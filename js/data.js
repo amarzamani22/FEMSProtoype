@@ -421,6 +421,9 @@ const S = {
   equipFilters: { location: 'all', type: 'all', status: 'all' },
   maintFilter: 'all',
   histSearch: '',
+  historyTab: 'maintenance',      // 'maintenance' | 'breakdowns' | 'fuel'
+  historyPeriod: '3m',            // 'all' | '1w' | '1m' | '3m' | '1y'
+  historyAssetFilter: 'all',      // 'all' | 'equipment' | 'facility' (maintenance tab only)
   partsSearch: '',
   partsFilter: 'all',
   addEquipStep: 1,
