@@ -117,6 +117,31 @@ function effectiveStatus(j) {
   return 'upcoming';
 }
 
+/* effectiveEquipmentStatus — derive an equipment's health from its jobs + breakdowns.
+   Same problem as effectiveStatus: the stored `status` column is only updated on breakdown
+   events, so "warning" and "overdue" never auto-appear. This derives them live.
+   Priority: breakdown > overdue > warning (due within 7 days / 50 op hrs) > ok. */
+
+function effectiveEquipmentStatus(e) {
+  if (!e) return 'ok';
+  if (BREAKDOWNS.some(b => b.equipId === e.id && b.status === 'active')) return 'breakdown';
+  const eqJobs = JOBS.filter(j => j.equipId === e.id && j.status !== 'completed');
+  if (eqJobs.some(j => effectiveStatus(j) === 'overdue')) return 'overdue';
+  const today = new Date();
+  const todayStr = today.toISOString().slice(0, 10);
+  const weekStr  = new Date(today.getTime() + 7 * 86400000).toISOString().slice(0, 10);
+  const HOUR_WARN_THRESHOLD = 50; // "due soon" if within ~50 operating hours (~1 work week)
+  if (eqJobs.some(j => {
+    if (j.basis === 'time' && j.dueDate) return j.dueDate >= todayStr && j.dueDate <= weekStr;
+    if (j.basis === 'hour' && j.dueHours != null && j.currentHours != null) {
+      const gap = j.dueHours - j.currentHours;
+      return gap >= 0 && gap <= HOUR_WARN_THRESHOLD;
+    }
+    return false;
+  })) return 'warning';
+  return 'ok';
+}
+
 function openModal(html) {
   const bd = document.getElementById('modal-backdrop');
   document.getElementById('modal-inner').innerHTML = html;
@@ -395,7 +420,7 @@ function renderNotificationPanel() {
       <div class="notif-empty">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" style="width:36px;height:36px;opacity:0.35;margin-bottom:8px;"><polyline points="20 6 9 17 4 12"/></svg>
         <div>No items need attention</div>
-        <div style="font-size:11px;color:var(--text-4);margin-top:3px;">Fleet is operational</div>
+        <div style="font-size:11px;color:var(--text-4);margin-top:3px;">All equipment operational</div>
       </div>
     `;
   }
@@ -591,6 +616,26 @@ function renderEmptyZero({ iconSvg, title, message, ctaHtml = '' }) {
   `;
 }
 
+/* downloadCsv — build a CSV blob from rows + headers and trigger a download.
+   Quotes every field and escapes embedded quotes/newlines per RFC 4180. */
+
+function downloadCsv(filename, headers, rows) {
+  const esc = v => {
+    if (v === null || v === undefined) return '';
+    const s = String(v);
+    if (/[",\n\r]/.test(s)) return '"' + s.replace(/"/g, '""') + '"';
+    return s;
+  };
+  const lines = [headers.map(esc).join(',')];
+  rows.forEach(r => lines.push(headers.map(h => esc(r[h])).join(',')));
+  const blob = new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8;' });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click();
+  setTimeout(() => { a.remove(); URL.revokeObjectURL(url); }, 100);
+}
+
 /* debounce — delay execution until N ms after the last call */
 
 function debounce(fn, ms = 400) {
@@ -646,6 +691,98 @@ function exportReportCsv() {
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
   toast(`Exported ${HISTORY.length} records to CSV`);
+}
+
+/* exportHistoryCsv — exports the active History tab (maintenance / breakdowns / fuel)
+   with the current period + filters applied, matching what's visible on screen. */
+
+function exportHistoryCsv() {
+  const tab    = S.historyTab    || 'maintenance';
+  const period = S.historyPeriod || '3m';
+  const assetFilter = S.historyAssetFilter || 'all';
+  const search = (S.histSearch || '').toLowerCase();
+  const now = new Date();
+  const cutoffMap = {
+    '1w': new Date(now.getTime() - 7   * 86400000),
+    '1m': new Date(now.getTime() - 30  * 86400000),
+    '3m': new Date(now.getTime() - 90  * 86400000),
+    '1y': new Date(now.getTime() - 365 * 86400000),
+  };
+  const cutoff = cutoffMap[period] ? cutoffMap[period].toISOString().slice(0, 10) : null;
+  const inPeriod = (dateStr) => !cutoff || (dateStr || '') >= cutoff;
+  const today = new Date().toISOString().slice(0,10);
+
+  if (tab === 'breakdowns') {
+    let rows = BREAKDOWNS.filter(b => inPeriod(b.date));
+    if (search) rows = rows.filter(b =>
+      b.equipName.toLowerCase().includes(search) ||
+      (b.equipCode || '').toLowerCase().includes(search) ||
+      (b.description || '').toLowerCase().includes(search) ||
+      (b.reportedBy  || '').toLowerCase().includes(search));
+    const out = rows.map(b => ({
+      Date: b.date, Time: b.time || '',
+      EquipmentCode: b.equipCode || '',
+      EquipmentName: b.equipName || '',
+      Severity: b.severity || '',
+      Status:   b.status   || '',
+      ReportedBy: b.reportedBy || '',
+      Description: b.description || '',
+      ResolvedDate: b.resolvedDate || '',
+      ResolvedBy:   b.resolvedBy   || '',
+      ResolutionNotes: b.resolutionNotes || '',
+    }));
+    downloadCsv(`fems-breakdowns-${today}.csv`, Object.keys(out[0] || {Date:'',Time:'',EquipmentCode:'',EquipmentName:'',Severity:'',Status:'',ReportedBy:'',Description:'',ResolvedDate:'',ResolvedBy:'',ResolutionNotes:''}), out);
+    toast(`Exported ${rows.length} breakdown records`);
+    return;
+  }
+
+  if (tab === 'fuel') {
+    let rows = FUEL_ENTRIES.filter(f => inPeriod(f.date));
+    if (search) rows = rows.filter(f =>
+      f.equipName.toLowerCase().includes(search) ||
+      (f.equipCode   || '').toLowerCase().includes(search) ||
+      (f.refuelledBy || '').toLowerCase().includes(search));
+    const out = rows.map(f => ({
+      Date: f.date,
+      EquipmentCode: f.equipCode || '',
+      EquipmentName: f.equipName || '',
+      Litres: f.litres || 0,
+      OperatingHours: f.operatingHours != null ? f.operatingHours : '',
+      PricePerLitre:  f.pricePerLitre  != null ? f.pricePerLitre  : '',
+      TotalCost:      f.totalCost      != null ? f.totalCost      : '',
+      RefuelledBy:    f.refuelledBy    || '',
+      Notes:          f.notes          || '',
+    }));
+    downloadCsv(`fems-fuel-${today}.csv`, Object.keys(out[0] || {Date:'',EquipmentCode:'',EquipmentName:'',Litres:'',OperatingHours:'',PricePerLitre:'',TotalCost:'',RefuelledBy:'',Notes:''}), out);
+    toast(`Exported ${rows.length} fuel records`);
+    return;
+  }
+
+  // Default: maintenance tab
+  let rows = HISTORY.filter(h => inPeriod(h.date));
+  if (assetFilter !== 'all') rows = rows.filter(h => (h.entityType || 'equipment') === assetFilter);
+  if (search) rows = rows.filter(h =>
+    h.equipName.toLowerCase().includes(search) ||
+    (h.equipCode || '').toLowerCase().includes(search) ||
+    h.type.toLowerCase().includes(search) ||
+    (h.tech || '').toLowerCase().includes(search));
+  const out = rows.map(h => ({
+    Date: h.date,
+    AssetType: h.entityType || 'equipment',
+    AssetCode: h.equipCode || '',
+    AssetName: h.equipName || '',
+    ServiceType: h.type || '',
+    Duration: h.duration || '',
+    PartsCount: h.parts || 0,
+    PartsCost:  h.partsCost || 0,
+    LaborCost:  h.laborCost || 0,
+    MiscCost:   h.miscCost  || 0,
+    TotalCost:  h.cost      || 0,
+    Technician: h.tech      || '',
+    Notes:      h.notes     || '',
+  }));
+  downloadCsv(`fems-maintenance-${today}.csv`, Object.keys(out[0] || {Date:'',AssetType:'',AssetCode:'',AssetName:'',ServiceType:'',Duration:'',PartsCount:'',PartsCost:'',LaborCost:'',MiscCost:'',TotalCost:'',Technician:'',Notes:''}), out);
+  toast(`Exported ${rows.length} maintenance records`);
 }
 
 /* compressImage — resize + re-encode an image File to a data URL.
