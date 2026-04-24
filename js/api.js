@@ -71,7 +71,9 @@ const API = (() => {
   async function me()     { const u = sessionUser(); if (!u) { await delay(null); throw new Error('Not logged in'); } return delay({ user: u }); }
 
   /* ─── Users ─── */
-  async function listUsers()          { return delay({ users: USERS.map(stripPassword) }); }
+  // NOTE: returning users WITH passwords here is intentional for the demo — auth happens
+  // client-side against USERS.password, so stripping them would break the next login.
+  async function listUsers()          { return delay({ users: USERS.map(u => ({ ...u })) }); }
   async function createUser(data) {
     if (USERS.some(u => u.email.toLowerCase() === (data.email||'').toLowerCase())) throw new Error('Email already exists');
     const u = {
