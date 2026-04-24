@@ -2844,6 +2844,8 @@ function attachHandlers() {
         setNotifications(false);
       } else if (act === 'export-report') {
         exportReportCsv();
+      } else if (act === 'export-history-csv') {
+        exportHistoryCsv();
       } else if (act === 'add-user') {
         openUserEditor(null);
       } else if (act === 'edit-user') {
@@ -2980,7 +2982,17 @@ function attachHandlers() {
   const filterStatus = document.getElementById('filter-status');
   if (filterStatus) filterStatus.addEventListener('change', e => { S.equipFilters.status = e.target.value; render(); });
 
-  // History search
+  // History page — tabs, period + asset filter, search
+  document.querySelectorAll('[data-history-tab]').forEach(el => {
+    el.addEventListener('click', () => {
+      S.historyTab = el.dataset.historyTab;
+      render();
+    });
+  });
+  const histPeriod = document.getElementById('hist-period');
+  if (histPeriod) histPeriod.addEventListener('change', e => { S.historyPeriod = e.target.value; render(); });
+  const histAsset  = document.getElementById('hist-asset-filter');
+  if (histAsset)   histAsset.addEventListener('change',  e => { S.historyAssetFilter = e.target.value; render(); });
   bindSearchInput('hist-search', 'histSearch');
 
   // Parts search & filter
