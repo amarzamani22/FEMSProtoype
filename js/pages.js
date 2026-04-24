@@ -20,7 +20,7 @@ function renderLogin() {
           </div>
         </div>
         <div class="login-title">FEMS</div>
-        <div class="login-sub">Car Medic · Fleet & Equipment Management</div>
+        <div class="login-sub">Car Medic · Equipment & Facility Management</div>
 
         <form id="login-form" style="display:flex;flex-direction:column;gap:12px;margin-top:24px;" autocomplete="off">
           <div class="field">
@@ -53,14 +53,17 @@ function renderLogin() {
    ═══════════════════════════════════════════════════════════ */
 
 function renderOverview() {
-  const breakdown = EQUIPMENT.filter(e => e.status === 'breakdown').length;
-  const overdue   = EQUIPMENT.filter(e => e.status === 'overdue').length;
-  const warning   = EQUIPMENT.filter(e => e.status === 'warning').length;
-  const ok        = EQUIPMENT.filter(e => e.status === 'ok').length;
+  const breakdown = EQUIPMENT.filter(e => effectiveEquipmentStatus(e) === 'breakdown').length;
+  const overdue   = EQUIPMENT.filter(e => effectiveEquipmentStatus(e) === 'overdue').length;
+  const warning   = EQUIPMENT.filter(e => effectiveEquipmentStatus(e) === 'warning').length;
+  const ok        = EQUIPMENT.filter(e => effectiveEquipmentStatus(e) === 'ok').length;
   const total     = EQUIPMENT.length;
-  const dueWeek   = JOBS.filter(j => j.status === 'upcoming').length;
-  const monthSpend = HISTORY.filter(h => h.date >= '2026-04-01').reduce((s,h) => s+h.cost, 0);
+  const dueWeek   = JOBS.filter(j => effectiveStatus(j) === 'upcoming').length;
   const activeBreakdowns = BREAKDOWNS.filter(b => b.status === 'active');
+  const partsOut  = PARTS.filter(p => p.stock === 0).length;
+  const partsLow  = PARTS.filter(p => p.stock > 0 && p.stock <= p.minStock).length;
+  const partsToReorder = partsOut + partsLow;
+  const facilityActive = FACILITIES.filter(f => f.status === 'active').length;
 
   // Donut: breakdown (crimson), overdue (red), warning (amber), ok (green)
   const r = 40, cx = 50, cy = 50;
@@ -143,28 +146,28 @@ function renderOverview() {
       })()}
 
       <div class="grid-4 mb-16">
-        <div class="kpi-card" style="background:var(--bd-bg);border-color:var(--bd-border);color:var(--bd-text);">
+        <div class="kpi-card card-click" style="background:var(--bd-bg);border-color:var(--bd-border);color:var(--bd-text);" data-nav="equipment">
           <div class="kpi-label" style="display:flex;align-items:center;gap:6px;">
             ${breakdown > 0 ? '<span class="bd-pulse-dot" style="width:7px;height:7px;"></span>' : ''}
             Breakdown
           </div>
           <div class="kpi-value" style="color:var(--bd-text);">${breakdown}</div>
-          <div class="kpi-sub">${breakdown===0?'fleet operational':'out of service'}</div>
+          <div class="kpi-sub">${breakdown===0?'all equipment operational':'out of service'}</div>
         </div>
-        <div class="kpi-card kpi-danger">
+        <div class="kpi-card kpi-danger card-click" data-nav="maintenance">
           <div class="kpi-label">Overdue service</div>
           <div class="kpi-value">${overdue}</div>
-          <div class="kpi-sub">need service now</div>
+          <div class="kpi-sub">${overdue===0?'all caught up':'need service now'}</div>
         </div>
-        <div class="kpi-card kpi-warning">
+        <div class="kpi-card kpi-warning card-click" data-nav="maintenance">
           <div class="kpi-label">Due this week</div>
           <div class="kpi-value">${dueWeek}</div>
           <div class="kpi-sub">upcoming jobs</div>
         </div>
-        <div class="kpi-card kpi-info">
-          <div class="kpi-label">${new Date().toLocaleString('en-US',{month:'long'})} spend</div>
-          <div class="kpi-value" style="font-size:20px;">${fmtRM(monthSpend)}</div>
-          <div class="kpi-sub">maintenance cost</div>
+        <div class="kpi-card ${partsToReorder > 0 ? 'kpi-warning' : 'kpi-info'} card-click" data-nav="parts">
+          <div class="kpi-label">Parts to reorder</div>
+          <div class="kpi-value">${partsToReorder}</div>
+          <div class="kpi-sub">${partsToReorder===0 ? 'stock levels healthy' : `${partsOut} out · ${partsLow} low stock`}</div>
         </div>
       </div>
 
@@ -180,7 +183,7 @@ function renderOverview() {
               emptyMsg = '✓ No overdue jobs · all caught up';
             } else if (tab === 'breakdown') {
               rows = activeBreakdowns.map(b => renderBreakdownCard(b)).join('');
-              emptyMsg = '✓ No active breakdowns · fleet operational';
+              emptyMsg = '✓ No active breakdowns · all equipment operational';
             } else {
               rows = upcomingJobs.map(j => renderJobCard(j)).join('');
               emptyMsg = 'No upcoming jobs scheduled in the next 14 days';
@@ -221,7 +224,10 @@ function renderOverview() {
 
         <div>
           <div class="card mb-12">
-            <div class="section-hd-title mb-8">Fleet health</div>
+            <div class="section-hd mb-8">
+              <div class="section-hd-title">Equipment health</div>
+              <span style="font-size:11px;color:var(--text-3);">${total} unit${total!==1?'s':''}</span>
+            </div>
             <div class="fleet-health">
               <div class="donut-wrap">
                 ${donutSvg}
@@ -257,24 +263,57 @@ function renderOverview() {
                 </div>
               </div>
             </div>
+            <div style="border-top:0.5px solid var(--border);margin-top:10px;padding-top:10px;display:flex;justify-content:space-between;align-items:center;font-size:11.5px;">
+              <span style="color:var(--text-3);">Facilities</span>
+              <a href="#" data-nav="facilities" style="color:var(--text-2);text-decoration:none;font-weight:500;">${facilityActive} active →</a>
+            </div>
           </div>
 
           <div class="card mb-12">
             <div class="section-hd mb-8">
-              <div class="section-hd-title">Recent completions</div>
-              <a href="#" data-nav="history" style="font-size:11px;color:var(--accent);text-decoration:none;">View all →</a>
+              <div class="section-hd-title">Today's activity</div>
+              <span style="font-size:11px;color:var(--text-3);">${fmtDate(new Date().toISOString().slice(0,10))}</span>
             </div>
-            <div style="display:flex;flex-direction:column;gap:0;">
-              ${HISTORY.slice(0,3).map((h,i) => `
-                <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;${i<2?'border-bottom:0.5px solid var(--border)':''}">
-                  <div style="min-width:0;flex:1;">
-                    <div style="font-size:12px;font-weight:500;color:var(--text-1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${h.equipName}</div>
-                    <div style="font-size:10.5px;color:var(--text-3);">${h.type} · ${fmtDate(h.date)}</div>
-                  </div>
-                  <div style="font-size:11px;font-weight:500;color:var(--text-2);margin-left:8px;">${fmtRM(h.cost)}</div>
+            ${(() => {
+              const today = new Date().toISOString().slice(0,10);
+              const events = [];
+              HISTORY.filter(h => h.date === today).forEach(h => events.push({
+                color: '#0f6e56', dot: '●',
+                title: `${h.equipName} · ${h.type}`,
+                sub:   `Completed by ${h.tech}`,
+              }));
+              BREAKDOWNS.filter(b => b.date === today).forEach(b => events.push({
+                color: '#c0392b', dot: '●',
+                title: `${b.equipName} · breakdown reported`,
+                sub:   `By ${b.reportedBy} at ${b.time}`,
+              }));
+              BREAKDOWNS.filter(b => b.resolvedDate === today && b.status === 'resolved').forEach(b => events.push({
+                color: '#0f6e56', dot: '●',
+                title: `${b.equipName} · breakdown resolved`,
+                sub:   `By ${b.resolvedBy}`,
+              }));
+              FUEL_ENTRIES.filter(f => f.date === today).forEach(f => events.push({
+                color: '#2563eb', dot: '●',
+                title: `${f.equipName} · ${f.litres}L fuel logged`,
+                sub:   f.refuelledBy ? `By ${f.refuelledBy}` : 'Fuel refuel',
+              }));
+              if (events.length === 0) {
+                return `<div style="text-align:center;padding:16px 8px;font-size:12px;color:var(--text-3);">Quiet day so far — no activity yet.</div>`;
+              }
+              return `
+                <div style="display:flex;flex-direction:column;gap:0;">
+                  ${events.slice(0, 5).map((ev, i) => `
+                    <div style="display:flex;align-items:flex-start;gap:8px;padding:7px 0;${i < Math.min(events.length,5)-1 ? 'border-bottom:0.5px solid var(--border)' : ''}">
+                      <span style="color:${ev.color};font-size:12px;line-height:18px;">${ev.dot}</span>
+                      <div style="min-width:0;flex:1;">
+                        <div style="font-size:12px;font-weight:500;color:var(--text-1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${ev.title}</div>
+                        <div style="font-size:10.5px;color:var(--text-3);">${ev.sub}</div>
+                      </div>
+                    </div>
+                  `).join('')}
                 </div>
-              `).join('')}
-            </div>
+              `;
+            })()}
           </div>
 
           <div class="card">
@@ -362,7 +401,7 @@ function renderEquipmentList() {
   }
   if (S.equipFilters.location !== 'all') filtered = filtered.filter(e => e.location === S.equipFilters.location);
   if (S.equipFilters.type !== 'all')     filtered = filtered.filter(e => e.type === S.equipFilters.type);
-  if (S.equipFilters.status !== 'all')   filtered = filtered.filter(e => e.status === S.equipFilters.status);
+  if (S.equipFilters.status !== 'all')   filtered = filtered.filter(e => effectiveEquipmentStatus(e) === S.equipFilters.status);
 
   return `
     <div>
@@ -424,11 +463,12 @@ function renderEquipmentList() {
 }
 
 function renderEquipCard(e) {
-  const color = statusColor(e.status);
-  const label = statusLabel(e.status);
+  const eStatus = effectiveEquipmentStatus(e);
+  const color = statusColor(eStatus);
+  const label = statusLabel(eStatus);
   const job   = JOBS.find(j => j.equipId === e.id && (effectiveStatus(j) === 'overdue' || effectiveStatus(j) === 'upcoming'));
   const activeBd = BREAKDOWNS.find(b => b.equipId === e.id && b.status === 'active');
-  const isBd = e.status === 'breakdown';
+  const isBd = eStatus === 'breakdown';
 
   const borderStyle = isBd ? 'border-color:var(--bd-border);border-left:3px solid var(--bd-text);' : '';
 
@@ -494,8 +534,9 @@ function renderEquipmentDetail() {
   const e = EQUIPMENT.find(eq => eq.id === S.selectedEquipment);
   if (!e) return `<div class="empty-state"><div class="empty-state-title">Equipment not found</div></div>`;
 
-  const color = statusColor(e.status);
-  const label = statusLabel(e.status);
+  const eStatus = effectiveEquipmentStatus(e);
+  const color = statusColor(eStatus);
+  const label = statusLabel(eStatus);
   const fuelLog = fuelMonthlyFor(e.id);
   const maxFuel = Math.max(...fuelLog);
   const equip_jobs  = JOBS.filter(j => j.equipId === e.id);
@@ -504,7 +545,7 @@ function renderEquipmentDetail() {
   const equip_bds   = BREAKDOWNS.filter(b => b.equipId === e.id);
   const equip_fuel  = FUEL_ENTRIES.filter(f => f.equipId === e.id);
   const activeBd    = equip_bds.find(b => b.status === 'active');
-  const isBd        = e.status === 'breakdown';
+  const isBd        = eStatus === 'breakdown';
 
   return `
     <div>
@@ -1322,80 +1363,286 @@ function renderSchedule() {
    ═══════════════════════════════════════════════════════════ */
 
 function renderHistory() {
-  let list = HISTORY;
-  if (S.histSearch) {
-    const q = S.histSearch.toLowerCase();
-    list = list.filter(h => h.equipName.toLowerCase().includes(q) || h.equipCode.toLowerCase().includes(q) || h.type.toLowerCase().includes(q) || h.tech.toLowerCase().includes(q));
+  const tab         = S.historyTab         || 'maintenance';
+  const period      = S.historyPeriod      || '3m';
+  const assetFilter = S.historyAssetFilter || 'all';
+  const search      = (S.histSearch || '').toLowerCase();
+
+  // Period cutoff — everything >= cutoff date is "in period"
+  const now = new Date();
+  const cutoffMap = {
+    '1w': new Date(now.getTime() - 7   * 86400000),
+    '1m': new Date(now.getTime() - 30  * 86400000),
+    '3m': new Date(now.getTime() - 90  * 86400000),
+    '1y': new Date(now.getTime() - 365 * 86400000),
+  };
+  const cutoff = cutoffMap[period] ? cutoffMap[period].toISOString().slice(0, 10) : null;
+  const inPeriod = (dateStr) => !cutoff || (dateStr || '') >= cutoff;
+
+  // Pre-filter each dataset by period (used for counts + the active tab view)
+  const maintAll = HISTORY.filter(h => inPeriod(h.date));
+  const bdAll    = BREAKDOWNS.filter(b => inPeriod(b.date));
+  const fuelAll  = FUEL_ENTRIES.filter(f => inPeriod(f.date));
+
+  // Tab-specific list: further filter by search + asset type
+  let list;
+  if (tab === 'breakdowns') {
+    list = bdAll.filter(b => !search ||
+      b.equipName.toLowerCase().includes(search) ||
+      (b.equipCode || '').toLowerCase().includes(search) ||
+      (b.description || '').toLowerCase().includes(search) ||
+      (b.reportedBy  || '').toLowerCase().includes(search));
+  } else if (tab === 'fuel') {
+    list = fuelAll.filter(f => !search ||
+      f.equipName.toLowerCase().includes(search) ||
+      (f.equipCode   || '').toLowerCase().includes(search) ||
+      (f.refuelledBy || '').toLowerCase().includes(search));
+  } else {
+    list = maintAll;
+    if (assetFilter !== 'all') list = list.filter(h => (h.entityType || 'equipment') === assetFilter);
+    if (search) list = list.filter(h =>
+      h.equipName.toLowerCase().includes(search) ||
+      (h.equipCode || '').toLowerCase().includes(search) ||
+      h.type.toLowerCase().includes(search) ||
+      (h.tech || '').toLowerCase().includes(search));
   }
 
-  const totalCost = list.reduce((s,h) => s+h.cost, 0);
-  const avgCost   = list.length ? Math.round(totalCost / list.length) : 0;
+  const periodLabel = {
+    'all': 'all time', '1w': 'last 7 days', '1m': 'last month',
+    '3m': 'last 3 months', '1y': 'last year',
+  }[period];
 
   return `
     <div>
       <div class="page-hd">
         <div class="page-hd-left">
-          <div class="page-title">Maintenance History</div>
-          <div class="page-sub">${HISTORY.length} completed jobs on record</div>
+          <div class="page-title">History</div>
+          <div class="page-sub">All maintenance, breakdown, and fuel records · ${periodLabel}</div>
         </div>
         <div class="page-hd-right">
-          <button class="btn">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
+          <button class="btn" data-action="export-history-csv">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" style="width:13px;height:13px"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
             Export CSV
           </button>
         </div>
       </div>
 
-      <div class="grid-4 mb-16">
-        <div class="kpi-card kpi-default"><div class="kpi-label">Total jobs</div><div class="kpi-value">${HISTORY.length}</div><div class="kpi-sub">all time</div></div>
-        <div class="kpi-card kpi-info"><div class="kpi-label">Total spend</div><div class="kpi-value" style="font-size:20px;">${fmtRM(HISTORY.reduce((s,h)=>s+h.cost,0))}</div><div class="kpi-sub">all time</div></div>
-        <div class="kpi-card kpi-default"><div class="kpi-label">Avg cost / job</div><div class="kpi-value" style="font-size:20px;">${fmtRM(avgCost)}</div><div class="kpi-sub">per maintenance</div></div>
-        <div class="kpi-card kpi-success"><div class="kpi-label">This month</div><div class="kpi-value">${HISTORY.filter(h=>h.date>='2026-04-01').length}</div><div class="kpi-sub">jobs completed</div></div>
+      <div class="filter-tabs mb-16">
+        <button class="filter-tab ${tab==='maintenance'?'active':''}" data-history-tab="maintenance">
+          Maintenance <span class="fc fc-neutral">${maintAll.length}</span>
+        </button>
+        <button class="filter-tab ${tab==='breakdowns'?'active':''}" data-history-tab="breakdowns">
+          Breakdowns <span class="fc ${bdAll.some(b => b.status==='active') ? 'fc-danger' : 'fc-neutral'}">${bdAll.length}</span>
+        </button>
+        <button class="filter-tab ${tab==='fuel'?'active':''}" data-history-tab="fuel">
+          Fuel logs <span class="fc fc-neutral">${fuelAll.length}</span>
+        </button>
       </div>
 
       <div class="toolbar mb-12">
         <label class="toolbar-search" style="max-width:300px;">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
-          <input type="search" id="hist-search" placeholder="Search by equipment, type, technician…" value="${S.histSearch}" autocomplete="off">
+          <input type="search" id="hist-search" placeholder="Search…" value="${S.histSearch||''}" autocomplete="off">
         </label>
+        <select class="filter-select" id="hist-period">
+          <option value="all" ${period==='all'?'selected':''}>All time</option>
+          <option value="1w"  ${period==='1w' ?'selected':''}>Last 7 days</option>
+          <option value="1m"  ${period==='1m' ?'selected':''}>Last month</option>
+          <option value="3m"  ${period==='3m' ?'selected':''}>Last 3 months</option>
+          <option value="1y"  ${period==='1y' ?'selected':''}>Last year</option>
+        </select>
+        ${tab === 'maintenance' ? `
+          <select class="filter-select" id="hist-asset-filter">
+            <option value="all"       ${assetFilter==='all'      ?'selected':''}>All assets</option>
+            <option value="equipment" ${assetFilter==='equipment'?'selected':''}>Equipment only</option>
+            <option value="facility"  ${assetFilter==='facility' ?'selected':''}>Facilities only</option>
+          </select>
+        ` : ''}
       </div>
 
-      <div class="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>Date</th>
-              <th>Equipment</th>
-              <th>Type</th>
-              <th>Duration</th>
-              <th>Parts</th>
-              <th>Cost</th>
-              <th>Technician</th>
-              <th>Status</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${list.map(h => `
+      ${tab === 'maintenance' ? renderHistMaintenance(list) :
+        tab === 'breakdowns'  ? renderHistBreakdowns(list)  :
+                                 renderHistFuel(list)}
+    </div>
+  `;
+}
+
+/* ─── History · Maintenance tab ─── */
+function renderHistMaintenance(list) {
+  const totalCost  = list.reduce((s,h) => s + (h.cost||0), 0);
+  const totalParts = list.reduce((s,h) => s + (h.partsCost||0), 0);
+  const totalLabor = list.reduce((s,h) => s + (h.laborCost||0), 0);
+  const avgCost    = list.length ? Math.round(totalCost / list.length) : 0;
+  const eqCount    = list.filter(h => (h.entityType||'equipment') === 'equipment').length;
+  const facCount   = list.filter(h => h.entityType === 'facility').length;
+
+  if (list.length === 0) {
+    return `<div class="empty-state">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+      <div class="empty-state-title">No maintenance records</div>
+      <div class="empty-state-sub">Nothing completed in the selected period. Try widening the date range or clearing filters.</div>
+    </div>`;
+  }
+
+  return `
+    <div class="grid-4 mb-16">
+      <div class="kpi-card kpi-default"><div class="kpi-label">Jobs completed</div><div class="kpi-value">${list.length}</div><div class="kpi-sub">${eqCount} equip · ${facCount} facility</div></div>
+      <div class="kpi-card kpi-info"><div class="kpi-label">Total spend</div><div class="kpi-value" style="font-size:20px;">${fmtRM(totalCost)}</div><div class="kpi-sub">P ${fmtRM(totalParts)} · L ${fmtRM(totalLabor)}</div></div>
+      <div class="kpi-card kpi-default"><div class="kpi-label">Avg cost / job</div><div class="kpi-value" style="font-size:20px;">${fmtRM(avgCost)}</div><div class="kpi-sub">per completion</div></div>
+      <div class="kpi-card kpi-success"><div class="kpi-label">Parts consumed</div><div class="kpi-value">${list.reduce((s,h)=>s+(h.parts||0),0)}</div><div class="kpi-sub">line items total</div></div>
+    </div>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Date</th><th>Asset</th><th>Service</th><th>Duration</th><th>Parts</th><th>Cost</th><th>Technician</th></tr>
+        </thead>
+        <tbody>
+          ${list.map(h => {
+            const isFac = h.entityType === 'facility';
+            return `
               <tr>
                 <td style="white-space:nowrap;color:var(--text-2);">${fmtDate(h.date)}</td>
                 <td>
-                  <div style="font-weight:500;">${h.equipName}</div>
-                  <span class="code">${h.equipCode}</span>
+                  <div style="display:flex;align-items:center;gap:6px;">
+                    <span class="pill ${isFac?'pill-info':'pill-neutral'}" style="font-size:9.5px;padding:1px 6px;">${isFac?'Facility':'Equipment'}</span>
+                    <div>
+                      <div style="font-weight:500;">${h.equipName}</div>
+                      ${h.equipCode ? `<span class="code">${h.equipCode}</span>` : ''}
+                    </div>
+                  </div>
                 </td>
                 <td>${h.type}</td>
-                <td style="color:var(--text-2);">${h.duration}</td>
-                <td style="text-align:center;">${h.parts}</td>
+                <td style="color:var(--text-2);">${h.duration || '—'}</td>
+                <td style="text-align:center;">${h.parts||0}</td>
                 <td style="font-weight:500;" title="Parts: ${fmtRM(h.partsCost||0)} · Labor: ${fmtRM(h.laborCost||0)} · Misc: ${fmtRM(h.miscCost||0)}">
                   ${fmtRM(h.cost)}
                   ${(h.partsCost || h.laborCost || h.miscCost) ? `<div style="font-size:10px;color:var(--text-3);font-weight:400;margin-top:2px;">P ${fmtRM(h.partsCost||0)} · L ${fmtRM(h.laborCost||0)}${h.miscCost ? ' · M ' + fmtRM(h.miscCost) : ''}</div>` : ''}
                 </td>
-                <td style="color:var(--text-2);">${h.tech}</td>
-                <td>${pill('Completed','ok')}</td>
+                <td style="color:var(--text-2);">${h.tech || '—'}</td>
               </tr>
-            `).join('')}
-          </tbody>
-        </table>
-      </div>
+            `;
+          }).join('')}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+/* ─── History · Breakdowns tab ─── */
+function renderHistBreakdowns(list) {
+  const active   = list.filter(b => b.status === 'active').length;
+  const resolved = list.filter(b => b.status === 'resolved').length;
+  const avgResolveDays = (() => {
+    const r = list.filter(b => b.status === 'resolved' && b.date && b.resolvedDate);
+    if (r.length === 0) return null;
+    const total = r.reduce((s,b) => s + Math.max(0, (new Date(b.resolvedDate) - new Date(b.date)) / 86400000), 0);
+    return Math.round(total / r.length);
+  })();
+  const byEquip = {};
+  list.forEach(b => { byEquip[b.equipName] = (byEquip[b.equipName] || 0) + 1; });
+  const worst = Object.entries(byEquip).sort((a,b) => b[1] - a[1])[0];
+
+  if (list.length === 0) {
+    return `<div class="empty-state">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><polyline points="20 6 9 17 4 12"/></svg>
+      <div class="empty-state-title">No breakdowns recorded</div>
+      <div class="empty-state-sub">Nothing was reported in the selected period — fleet kept operational.</div>
+    </div>`;
+  }
+
+  return `
+    <div class="grid-4 mb-16">
+      <div class="kpi-card ${active>0?'kpi-danger':'kpi-default'}"><div class="kpi-label">Total breakdowns</div><div class="kpi-value">${list.length}</div><div class="kpi-sub">${active} active · ${resolved} resolved</div></div>
+      <div class="kpi-card kpi-default"><div class="kpi-label">Avg time to resolve</div><div class="kpi-value" style="font-size:22px;">${avgResolveDays == null ? '—' : `${avgResolveDays}d`}</div><div class="kpi-sub">from report to fix</div></div>
+      <div class="kpi-card kpi-warning"><div class="kpi-label">Most breakdowns</div><div class="kpi-value" style="font-size:14px;line-height:1.3;">${worst ? worst[0] : '—'}</div><div class="kpi-sub">${worst ? worst[1] + ' report' + (worst[1]>1?'s':'') : 'no data'}</div></div>
+      <div class="kpi-card kpi-info"><div class="kpi-label">Critical</div><div class="kpi-value">${list.filter(b => b.severity === 'critical').length}</div><div class="kpi-sub">severity · any status</div></div>
+    </div>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Date · Time</th><th>Equipment</th><th>Severity</th><th>Status</th><th>Reported by</th><th>Resolved by</th><th>Description</th></tr>
+        </thead>
+        <tbody>
+          ${list.map(b => `
+            <tr>
+              <td style="white-space:nowrap;color:var(--text-2);">${fmtDate(b.date)} <span style="color:var(--text-3);">· ${b.time || ''}</span></td>
+              <td>
+                <div style="font-weight:500;">${b.equipName}</div>
+                ${b.equipCode ? `<span class="code">${b.equipCode}</span>` : ''}
+              </td>
+              <td>${bdSeverityPill(b.severity)}</td>
+              <td>${b.status === 'active' ? pill('Active','danger') : pill('Resolved','ok')}</td>
+              <td style="color:var(--text-2);">${b.reportedBy || '—'}</td>
+              <td style="color:var(--text-2);">${b.resolvedBy || '—'}</td>
+              <td style="color:var(--text-2);max-width:320px;">
+                <div style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${(b.description||'').replace(/"/g,'&quot;')}">${b.description || '—'}</div>
+                ${b.resolutionNotes ? `<div style="font-size:10.5px;color:var(--text-3);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${b.resolutionNotes.replace(/"/g,'&quot;')}">→ ${b.resolutionNotes}</div>` : ''}
+              </td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+/* ─── History · Fuel tab ─── */
+function renderHistFuel(list) {
+  const totalLitres = list.reduce((s,f) => s + (f.litres || 0), 0);
+  const totalCost   = list.reduce((s,f) => s + (f.totalCost != null ? f.totalCost : (f.litres || 0) * (f.pricePerLitre || 0)), 0);
+  const avgPrice    = totalLitres > 0 ? totalCost / totalLitres : 0;
+  const byEquip = {};
+  list.forEach(f => {
+    const k = f.equipName;
+    byEquip[k] = byEquip[k] || { litres: 0, cost: 0 };
+    byEquip[k].litres += (f.litres || 0);
+    byEquip[k].cost   += (f.totalCost != null ? f.totalCost : (f.litres || 0) * (f.pricePerLitre || 0));
+  });
+  const top = Object.entries(byEquip).sort((a,b) => b[1].litres - a[1].litres)[0];
+
+  if (list.length === 0) {
+    return `<div class="empty-state">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M3 22h12V2H3v20zM15 8h3a2 2 0 012 2v8a2 2 0 01-2 2M9 8V4M9 12h.01"/></svg>
+      <div class="empty-state-title">No fuel logged</div>
+      <div class="empty-state-sub">No refuel entries in the selected period.</div>
+    </div>`;
+  }
+
+  return `
+    <div class="grid-4 mb-16">
+      <div class="kpi-card kpi-default"><div class="kpi-label">Total litres</div><div class="kpi-value">${Math.round(totalLitres).toLocaleString()}</div><div class="kpi-sub">${list.length} refuel${list.length>1?'s':''}</div></div>
+      <div class="kpi-card kpi-info"><div class="kpi-label">Total fuel cost</div><div class="kpi-value" style="font-size:20px;">${fmtRM(Math.round(totalCost))}</div><div class="kpi-sub">avg RM ${avgPrice.toFixed(2)}/L</div></div>
+      <div class="kpi-card kpi-warning"><div class="kpi-label">Top consumer</div><div class="kpi-value" style="font-size:14px;line-height:1.3;">${top ? top[0] : '—'}</div><div class="kpi-sub">${top ? Math.round(top[1].litres) + ' L · ' + fmtRM(Math.round(top[1].cost)) : 'no data'}</div></div>
+      <div class="kpi-card kpi-default"><div class="kpi-label">Avg per refuel</div><div class="kpi-value" style="font-size:20px;">${list.length ? Math.round(totalLitres/list.length) : 0} L</div><div class="kpi-sub">${list.length ? fmtRM(Math.round(totalCost/list.length)) : 'RM 0'}</div></div>
+    </div>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Date</th><th>Equipment</th><th>Litres</th><th>Price/L</th><th>Total cost</th><th>Op. hours</th><th>Refuelled by</th></tr>
+        </thead>
+        <tbody>
+          ${list.map(f => {
+            const cost = f.totalCost != null ? f.totalCost : (f.litres || 0) * (f.pricePerLitre || 0);
+            return `
+              <tr>
+                <td style="white-space:nowrap;color:var(--text-2);">${fmtDate(f.date)}</td>
+                <td>
+                  <div style="font-weight:500;">${f.equipName}</div>
+                  ${f.equipCode ? `<span class="code">${f.equipCode}</span>` : ''}
+                </td>
+                <td style="text-align:center;font-weight:500;">${(f.litres||0).toLocaleString()} L</td>
+                <td style="color:var(--text-2);">${f.pricePerLitre != null ? 'RM ' + f.pricePerLitre.toFixed(2) : '—'}</td>
+                <td style="font-weight:500;">${fmtRM(Math.round(cost))}</td>
+                <td style="color:var(--text-2);">${f.operatingHours != null ? f.operatingHours.toLocaleString() : '—'}</td>
+                <td style="color:var(--text-2);">${f.refuelledBy || '—'}</td>
+              </tr>
+            `;
+          }).join('')}
+        </tbody>
+      </table>
     </div>
   `;
 }
@@ -2150,7 +2397,7 @@ function renderReports() {
 
       <div class="grid-4 mb-16">
         <div class="kpi-card kpi-info">
-          <div class="kpi-label">Total fleet spend</div>
+          <div class="kpi-label">Total spend</div>
           <div class="kpi-value" style="font-size:18px;">${fmtRM(grandSpend)}</div>
           <div class="kpi-sub">${hasBreakdown
             ? `P ${fmtRM(totalPartsSpend)} · L ${fmtRM(totalLaborSpend)}${totalMiscSpend > 0 ? ' · M ' + fmtRM(totalMiscSpend) : ''}`
